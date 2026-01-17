@@ -42,6 +42,7 @@ module SpreePaypalCheckout
     # we need to perform this for quick checkout orders which do not have these fields filled
     def add_customer_information(order, paypal_data)
       payer = paypal_data['payer']
+      # Use shipping address as a fallback for billing if not explicitly provided
       paypal_address = paypal_data.dig('purchase_units', 0, 'shipping', 'address') || payer.dig('address')
 
       return unless paypal_address

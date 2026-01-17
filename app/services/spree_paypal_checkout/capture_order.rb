@@ -25,6 +25,8 @@ module SpreePaypalCheckout
         # gateway_response.params is a JSON response from PayPal APIs
         paypal_order.update!(data: gateway_response.params)
 
+        add_customer_information(order, paypal_order.data)
+
         # create the Spree::Payment record
         paypal_order.create_payment!
 
@@ -38,58 +40,43 @@ module SpreePaypalCheckout
     private
 
     # we need to perform this for quick checkout orders which do not have these fields filled
-    def add_customer_information(order, charge)
-      billing_details = charge.billing_details
-      address = billing_details.address
+    def add_customer_information(order, paypal_data)
+      payer = paypal_data['payer']
+      paypal_address = paypal_data.dig('purchase_units', 0, 'shipping', 'address') || payer.dig('address')
 
-      order.email ||= billing_details.email
-      order.save! if order.email_changed?
+      return unless paypal_address
 
-      # we don't need to perform this if we already have the billing address filled
-      return order if order.bill_address.present? && order.bill_address.valid?
+      order.email ||= payer['email_address']
 
-      # determine country...
-      country_iso = address.country
-      country = Spree::Country.find_by(iso: country_iso) || Spree::Country.default
+      # Only populate if the order doesn't already have a valid billing address
+      return if order.bill_address.present? && order.bill_address.valid?
 
-      # assign new address if we don't have one
+      country = Spree::Country.find_by(iso: paypal_address['country_code']) || Spree::Country.default
+
       order.bill_address ||= Spree::Address.new(country: country, user: order.user)
+      order.bill_address.attributes = {
+        firstname: payer.dig('name', 'given_name') || 'PayPal',
+        lastname: payer.dig('name', 'surname') || 'User',
+        address1: paypal_address['address_line_1'],
+        address2: paypal_address['address_line_2'],
+        city: paypal_address['admin_area_2'],
+        zipcode: paypal_address['postal_code'],
+        phone: order.ship_address&.phone || '0000000000' # PayPal doesn't always return phone
+      }
 
-      # assign attributes
-      order.bill_address.quick_checkout = true # skipping some validations
-
-      # sometimes google pay doesn't provide name (geez)
-      first_name = billing_details.name&.split(' ')&.first || order.ship_address&.first_name || order.user&.first_name
-      last_name = billing_details.name&.split(' ')&.last || order.ship_address&.last_name || order.user&.last_name
-
-      order.bill_address.first_name ||= first_name
-      order.bill_address.last_name ||= last_name
-      order.bill_address.phone ||= billing_details.phone
-      order.bill_address.address1 ||= address.line1
-      order.bill_address.address2 ||= address.line2
-      order.bill_address.city ||= address.city
-      order.bill_address.zipcode ||= address.postal_code
-
-      state_name = address.state
-      if country.states_required?
-        order.bill_address.state = country.states.find_all_by_name_or_abbr(state_name)&.first if country.states_required?
-      else
-        order.bill_address.state_name = state_name
+      # Handle state/province
+      state_code = paypal_address['admin_area_1']
+      if state_code.present?
+        state = country.states.find_by(abbr: state_code) || country.states.find_by(name: state_code)
+        if state
+          order.bill_address.state = state
+        else
+          order.bill_address.state_name = state_code
+        end
       end
 
-      order.bill_address.state_name ||= state_name
-
-      if order.bill_address.invalid?
-        order.bill_address = order.ship_address
-      else
-        order.bill_address.save!
-      end
-
+      order.bill_address.save!
       order.save!
-
-      copy_bill_info_to_user(order) if order.user.present?
-
-      order
     end
 
     def copy_bill_info_to_user(order)

@@ -1,4 +1,3 @@
-# spree_paypal_checkout/app/presenters/spree_paypal_checkout/order_presenter.rb
 require 'paypal_server_sdk'
 
 module SpreePaypalCheckout

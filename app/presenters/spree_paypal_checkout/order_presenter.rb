@@ -2,7 +2,7 @@ require 'paypal_server_sdk'
 
 module SpreePaypalCheckout
   # This presenter is responsible for transforming a Spree::Order object into the
-  # complex JSON structure required by the PayPal V2 Orders API. It acts as a
+  # JSON structure required by the PayPal V2 Orders API. It acts as a
   # translation layer between Spree's data models and the paypal-server-sdk.
   class OrderPresenter
     include PaypalServerSdk
